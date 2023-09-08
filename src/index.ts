@@ -3,191 +3,143 @@ import { parse } from "@babel/parser";
 import traverse from "@babel/traverse";
 import generate from "@babel/generator";
 import * as types from "@babel/types";
-import { OutputPlugin, OutputChunk } from "rollup";
+import type { Plugin } from "rollup";
+
+// TODO: 开启terser后，sourcemap映射异常
 
 /**
  * 从源码中把userscript的meta注释抽离出来
- * @param {string} code
- * @param {string} scriptOutputPath
+ * @param {string} code 源码
  * @returns {object}
  */
-function splitMetaData(sourceFile: OutputChunk, scriptOutputPath?: string) {
-  const ast = parse(sourceFile.code);
+function splitMetaCommentsFromCode(code: string) {
+  const ast = parse(code, {
+    sourceType: "unambiguous",
+  });
 
   const filterOfStart = (v) =>
     v.type == "CommentLine" && v.value.includes("==UserScript==");
   const filterOfEnd = (v) =>
     v.type == "CommentLine" && v.value.includes("==/UserScript==");
 
-  // 从注释中提取出userscript的meta
-  function extractMetaFromComments(comments) {
-    if (!comments) {
-      return;
-    }
-
-    const startNodeIndex = comments.findIndex(filterOfStart);
-    const endNodeIndex = comments.findIndex(filterOfEnd);
-    if (startNodeIndex == -1 || endNodeIndex == -1) {
-      return;
-    }
-    const metaCommentArr = comments.splice(
-      startNodeIndex,
-      endNodeIndex - startNodeIndex + 1
-    );
-    return metaCommentArr;
-  }
-
-  // 生成内容为userscript的meta的ast
-  // ⚠️：会修改源码ast
-  function generateMetaAst(metaCommentArr) {
-    const emptyNode = types.program([], [], "script");
-    types.addComments(emptyNode, "inner", metaCommentArr);
-
-    if (scriptOutputPath) {
-      // inject require statement of real script
-      const requireCommentValue = ` @require file://${scriptOutputPath}`;
-      types.addComment(emptyNode, "inner", requireCommentValue, true);
-
-      // adjust require statment order in comment array
-      const requireCommentIndex = emptyNode.innerComments.findIndex(
-        (comment) =>
-          comment.type == "CommentLine" && comment.value === requireCommentValue
-      );
-      const requireComment = emptyNode.innerComments.splice(
-        requireCommentIndex,
-        1
-      )[0];
-      emptyNode.innerComments.splice(
-        emptyNode.innerComments.findIndex(filterOfEnd),
-        0,
-        requireComment
-      );
-    }
-
-    return generate(emptyNode);
-  }
-
-  // 遍历源码ast查找包含userscript的meta的评论
+  // 遍历源码ast查找包含userscript的meta的注释
   function findCommentsContainMeta(ast) {
-    let result;
-    let hasMetaComments: boolean = false;
+    let result = [];
+
+    // 抽离出带有meta的注释
+    function exarctComments(comments) {
+      if (!comments) {
+        return;
+      }
+      while (comments.length) {
+        const startNodeIndex = comments.findIndex(filterOfStart);
+        const endNodeIndex = comments.findIndex(filterOfEnd);
+
+        if (startNodeIndex == -1 || endNodeIndex == -1) {
+          break;
+        }
+        let newComments = comments.splice(
+          startNodeIndex,
+          endNodeIndex - startNodeIndex + 1
+        );
+        newComments.shift();
+        newComments.pop();
+        result = result.concat(newComments);
+      }
+    }
 
     traverse(ast, {
-      Program(path) {
-        if (hasMetaComments) return;
-        const metaCommentArr = extractMetaFromComments(
-          path.node.body?.[0]?.leadingComments
-        );
-        if (!metaCommentArr) return;
-        hasMetaComments = true;
-        result = metaCommentArr;
-      },
-      ExpressionStatement(path) {
-        if (hasMetaComments) return;
-        const metaCommentArr =
-          extractMetaFromComments(path.node?.leadingComments) ||
-          extractMetaFromComments(path.node?.trailingComments);
-        if (!metaCommentArr) return;
-        hasMetaComments = true;
-        result = metaCommentArr;
-      },
-      BlockStatement(path) {
-        if (hasMetaComments) return;
-        const metaCommentArr = extractMetaFromComments(
-          path.node?.innerComments
-        );
-        if (!metaCommentArr) return;
-        hasMetaComments = true;
-        result = metaCommentArr;
+      enter(path) {
+        exarctComments(path.node.leadingComments);
+        exarctComments(path.node.trailingComments);
       },
     });
     return result;
   }
 
-  const metaComments = findCommentsContainMeta(ast);
-  const metaGenerateResult = generateMetaAst(metaComments);
-  const scriptGenerateResult = generate(ast, {
-    sourceMaps: true,
-    inputSourceMap: sourceFile.map,
-  });
-
   return {
-    meta: metaGenerateResult,
-    script: scriptGenerateResult,
+    metaCommentArr: findCommentsContainMeta(ast),
+    script: generate(ast),
   };
-}
-
-/**
- * 将多个ast重新组装到一起
- * @param {object[]} generateResult 调用@babel/generate的generate方法生成的产物
- */
-function combineGenerateResult(sourceFile: OutputChunk, ...generateResult) {
-  const existingGenerateResult = generateResult
-    .map((rs) => rs?.code)
-    .filter(Boolean);
-  if (existingGenerateResult.length > 1) {
-    const code = existingGenerateResult.join("\n");
-    return generate(
-      parse(code),
-      {
-        sourceMaps: true,
-        inputSourceMap: sourceFile.map,
-      },
-      code
-    );
-  } else if (existingGenerateResult.length == 1) {
-    return existingGenerateResult[0];
-  }
-  return;
 }
 
 /**
  * 将babel产出的sourceMap的部分字段填充回rollup的sourceMap中
  * @param {object} originalMap 原sourcemap
  * @param {object} newMap 插件转换后的sourcemap
- * @param {string} newCode 
- * @returns 
+ * @param {string} newCode
+ * @returns
  */
-function adaptSourceMap(originalMap, newMap, newCode) {
+function adaptSourceMap(originalMap, newMap) {
   if (!newMap) {
     return originalMap;
   }
   return Object.assign(originalMap, {
     names: newMap.names,
     mappings: newMap.mappings,
-    sourcesContent: newMap.sourcesContent
+    sourcesContent: newMap.sourcesContent,
   });
 }
 
-
 /**
- * 补全代码末的换行符。
- * generate会把源码末尾的换行符去掉，
- * 原因待排查，暂时用该方法手动加回去。
- * @param {string} originalCode 插件处理前的代码
- * @param {string} newCode  插件处理后的代码
- * @returns 
+ * 生成一个只有传入comments的ast
+ * @param metaCommentArr
+ * @returns
  */
-function completeEndLineBreak(originalCode, newCode) {
-  if (!originalCode || !newCode) {
-    return originalCode;
-  }
-  if (originalCode.endsWith("\n") && !newCode.endsWith("\n")) {
-    originalCode = `${newCode}\n`;
-  } else {
-    originalCode = newCode;
-  }
-  return originalCode;
+function generateMetaCommentAst(metaCommentArr) {
+  const emptyNode = types.program([], [], "script");
+
+  types.addComment(emptyNode, "inner", "==UserScript==", true);
+  metaCommentArr?.length &&
+    types.addComments(emptyNode, "inner", metaCommentArr);
+  types.addComment(emptyNode, "inner", "==/UserScript==", true);
+  return emptyNode;
 }
 
 /**
- * 将脚本输出到另一个文件
- * 然后原输出文件只留下userscript的metadata，同时插入"require"指令指向上述文件的文件路径
- * 实现开发时的脚本逻辑实时同步
- *
+ * 将导入语句添加到ast中
+ * @param metaCommentAst 包含
+ * @param {string} scriptOutputPath 开发用的脚本输出的文件路径
+ * @param {boolean} shouldAppendRequireComment 是否插入导入上述开发脚本的注释
+ * @returns
+ */
+function addDevScriptRequireStatementToMetaCommentAst(
+  metaCommentAst,
+  scriptOutputPath
+) {
+  if (scriptOutputPath) {
+    if (!metaCommentAst) {
+      metaCommentAst = types.program([], [], "script");
+
+      types.addComment(metaCommentAst, "inner", " ==UserScript==", true);
+      types.addComment(metaCommentAst, "inner", " ==/UserScript==", true);
+    }
+
+    const requireCommentValue = ` @require file://${scriptOutputPath}`;
+
+    types.addComment(metaCommentAst, "inner", requireCommentValue, true);
+
+    const requireComment = metaCommentAst.innerComments.splice(
+      metaCommentAst.innerComments.length - 1,
+      1
+    )[0];
+
+    metaCommentAst.innerComments.splice(
+      metaCommentAst.innerComments.length - 1,
+      0,
+      requireComment
+    );
+
+    return metaCommentAst;
+  }
+}
+
+/**
+ * 通过插入"require"指令引用存放在文件系统的脚本
+ * 避免开发时需要重复去复制粘贴脚本到油猴编辑区
  * @param {object} options
  * @param {string} options.name 输出文件名
- * @param {boolean} options.extractToHeader 将userscript的meta注释提取到文件顶部而不是抽离到另一个文件夹
+ * @param {boolean} options.extractToHeader 将userscript的meta注释提取到文件顶部而不是抽离到另一个文件
  * @returns
  */
 type PluginOptions = {
@@ -195,31 +147,48 @@ type PluginOptions = {
   extractToHeader?: boolean;
 };
 
-export default function (options: PluginOptions): OutputPlugin {
-  const workspace = process.cwd();
+export default function (options: PluginOptions): Plugin {
+  let metaCommentArr = [];
+
   return {
-    name: "rollup-plugin-userscript-develop",
+    name: "rollup-plugin-userscript-responsive-develop",
+    transform(code) {
+      let { metaCommentArr: newMetaComments, script } =
+        splitMetaCommentsFromCode(code);
+      metaCommentArr = [...metaCommentArr, ...newMetaComments];
+      return {
+        code: script.code,
+        map: script.map,
+      };
+    },
     generateBundle(outputOpts, bundle) {
       Object.values(bundle).forEach((file) => {
         if (file.type === "chunk") {
-          const { meta, script } = splitMetaData(
-            file,
-            path.resolve(workspace, outputOpts.file)
-          );
           if (options?.extractToHeader) {
-            const combineResult = combineGenerateResult(file, meta, script);
-            file.code = completeEndLineBreak(file.code, combineResult?.code);
-            file.map = adaptSourceMap(file.map, combineResult.map, combineResult.code)
-          } else {
-            if (meta?.code) {
-              this.emitFile({
-                type: "asset",
-                fileName: options?.name ?? `debug.${outputOpts.file}$`,
-                source: meta.code,
+            if (metaCommentArr.length) {
+              const metaCommentsAst = generateMetaCommentAst(metaCommentArr);
+
+              metaCommentsAst.body.push(...parse(file.code).program.body);
+
+              const { code: newCode, map: newMap } = generate(metaCommentsAst, {
+                inputSourceMap: file.map,
+                sourceMaps: true,
               });
-              file.code = completeEndLineBreak(file.code, script?.code);
-              file.map = adaptSourceMap(file.map, script.map, script.code)
+
+              file.code = newCode;
+              file.map = adaptSourceMap(file.map, newMap);
             }
+          } else {
+            const metaCommentsAst =
+              addDevScriptRequireStatementToMetaCommentAst(
+                generateMetaCommentAst(metaCommentArr),
+                path.resolve(process.cwd(), outputOpts.file)
+              );
+            this.emitFile({
+              type: "asset",
+              fileName: options?.name ?? `debug.${outputOpts.file}$`,
+              source: generate(metaCommentsAst).code,
+            });
           }
         }
       });
