@@ -1,6 +1,6 @@
 {
   "name": "rollup-plugin-userscript-responsive-develop",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Avoid copying and pasting scripts multiple times during development",
   "author": {
     "name": "lzh-marble",
@@ -14,19 +14,10 @@
     "prod": "NODE_ENV=prod npm run build",
     "dev": "nodemon --exec npm run build --watch src -e js,ts"
   },
-  "peerDependencies": {
-    "@babel/generator": ">=7.0.0",
-    "@babel/parser": ">=7.0.0",
-    "@babel/template": ">=7.0.0",
-    "@babel/traverse": ">=7.0.0",
-    "@babel/types": ">=7.0.0"
-  },
   "dependencies": {
-    "@babel/generator": "^7.22.10",
-    "@babel/parser": "^7.22.14",
-    "@babel/template": "^7.22.5",
-    "@babel/traverse": "^7.22.11",
-    "@babel/types": "^7.22.11"
+    "acorn-walk": "^8.2.0",
+    "estree-walker": "^3.0.3",
+    "magic-string": "^0.30.3"
   },
   "devDependencies": {
     "@babel/core": "^7.22.11",
@@ -39,7 +30,7 @@
     "@rollup/plugin-terser": "^0.4.3",
     "@types/node": "^18.17.14",
     "core-js": "^3.32.1",
-    "nodemon": "^2.0.22",
+    "nodemon": "^3.0.0",
     "npm-run-all": "^4.1.5",
     "rollup": "^2.79.1",
     "typescript": "^4.9.5"
@@ -55,7 +46,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "engines": {
     "node": ">=14.0.0"

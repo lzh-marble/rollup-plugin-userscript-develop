@@ -1,1 +1,93 @@
-"use strict";var e=require("path"),n=require("@babel/parser"),t=require("@babel/traverse"),r=require("@babel/generator"),o=require("@babel/types");function i(e){return e&&"object"==typeof e&&"default"in e?e:{default:e}}function s(e){if(e&&e.__esModule)return e;var n=Object.create(null);return e&&Object.keys(e).forEach((function(t){if("default"!==t){var r=Object.getOwnPropertyDescriptor(e,t);Object.defineProperty(n,t,r.get?r:{enumerable:!0,get:function(){return e[t]}})}})),n.default=e,Object.freeze(n)}var a=i(e),u=i(t),c=i(r),l=s(o);function m(e){const n=l.program([],[],"script");return l.addComment(n,"inner","==UserScript==",!0),(null==e?void 0:e.length)&&l.addComments(n,"inner",e),l.addComment(n,"inner","==/UserScript==",!0),n}module.exports=function(e){let t=[];return{name:"rollup-plugin-userscript-responsive-develop",transform(e){let{metaCommentArr:r,script:o}=function(e){const t=n.parse(e,{sourceType:"unambiguous"}),r=e=>"CommentLine"==e.type&&e.value.includes("==UserScript=="),o=e=>"CommentLine"==e.type&&e.value.includes("==/UserScript==");return{metaCommentArr:function(e){let n=[];function t(e){if(e)for(;e.length;){const t=e.findIndex(r),i=e.findIndex(o);if(-1==t||-1==i)break;let s=e.splice(t,i-t+1);s.shift(),s.pop(),n=n.concat(s)}}return u.default(e,{enter(e){t(e.node.leadingComments),t(e.node.trailingComments)}}),n}(t),script:c.default(t)}}(e);return t=[...t,...r],{code:o.code,map:o.map}},generateBundle(r,o){Object.values(o).forEach((o=>{if("chunk"===o.type)if(null!=e&&e.extractToHeader){if(t.length){const e=m(t);e.body.push(...n.parse(o.code).program.body);const{code:r,map:i}=c.default(e,{inputSourceMap:o.map,sourceMaps:!0});o.code=r,o.map=function(e,n){return n?Object.assign(e,{names:n.names,mappings:n.mappings,sourcesContent:n.sourcesContent}):e}(o.map,i)}}else{const n=function(e,n){if(n){e||(e=l.program([],[],"script"),l.addComment(e,"inner"," ==UserScript==",!0),l.addComment(e,"inner"," ==/UserScript==",!0));const t=` @require file://${n}`;l.addComment(e,"inner",t,!0);const r=e.innerComments.splice(e.innerComments.length-1,1)[0];return e.innerComments.splice(e.innerComments.length-1,0,r),e}}(m(t),a.default.resolve(process.cwd(),r.file));this.emitFile({type:"asset",fileName:(null==e?void 0:e.name)??`debug.${r.file}$`,source:c.default(n).code})}}))}}};
+'use strict';
+
+var path = require('path');
+var MagicString = require('magic-string');
+var acornWalk = require('acorn-walk');
+
+function _interopDefaultLegacy (e) { return e && typeof e === 'object' && 'default' in e ? e : { 'default': e }; }
+
+var path__default = /*#__PURE__*/_interopDefaultLegacy(path);
+var MagicString__default = /*#__PURE__*/_interopDefaultLegacy(MagicString);
+
+/**
+ * 通过插入"require"指令引用存放在文件系统的脚本
+ * 避免开发时需要重复去复制粘贴脚本到油猴编辑区
+ * @param {object} options
+ * @param {string} options.name 输出文件名
+ * @param {boolean} options.extractToExternal 将userscript的meta注释抽离到另一个脚本文件，并在该脚本添加@require指令 指向原脚本文件
+ * @returns
+ */
+
+function index (options) {
+  let metaCommentArr = [];
+  return {
+    name: "rollup-plugin-userscript-responsive-develop",
+    transform(code) {
+      let ms = new MagicString__default["default"](code);
+      let isUserscriptMeta = false;
+      const ast = this.parse(code, {
+        onComment: (isBlock, text, start, end) => {
+          if (!isBlock) {
+            if (text.includes("==UserScript==")) {
+              isUserscriptMeta = true;
+              ms.remove(start, end);
+              return;
+            }
+            if (text.includes("==/UserScript==")) {
+              isUserscriptMeta = false;
+              ms.remove(start, end);
+              return;
+            }
+            if (isUserscriptMeta) {
+              metaCommentArr.push(text.trim());
+              ms.remove(start, end);
+            }
+          }
+        }
+      });
+      acornWalk.full(ast, node => {
+        ms.addSourcemapLocation(node.start);
+        ms.addSourcemapLocation(node.end);
+      });
+      return {
+        code: ms.toString(),
+        map: ms.generateMap({
+          includeContent: true
+        })
+      };
+    },
+    generateBundle(outputOpts, bundle) {
+      Object.values(bundle).forEach(file => {
+        if (file.type === "chunk") {
+          if (options?.extractToExternal) {
+            // 中间空格的长度，取所有meta中空格数最多的
+            const spaceLength = metaCommentArr.reduce((result, comment) => {
+              const prefixLength = comment.match(/@\w+\s+/).length - "@require".length;
+              return result = Math.max(prefixLength, result);
+            }, 1);
+            metaCommentArr = [...metaCommentArr, `@require${" ".repeat(spaceLength)}file://${path__default["default"].resolve(process.cwd(), outputOpts.file)}`];
+
+            // 只添加@require指令的话，需要补全开头结尾指令
+            if (metaCommentArr.length == 1) {
+              metaCommentArr = ["==UserScript==", ...metaCommentArr, "==/UserScript=="];
+            }
+            this.emitFile({
+              type: "asset",
+              fileName: options?.name ?? `debug.${outputOpts.file}$`,
+              source: metaCommentArr.map(c => `// ${c}\n`).join("")
+            });
+          } else {
+            if (metaCommentArr.length) {
+              file.code = `${metaCommentArr.map(c => `// ${c}\n`).join("")}\n${file.code}`;
+
+              // 因为是给生成代码的顶部添加meta注释，所以mapping也要加上相同行数的空行使映射正确
+              file.map.mappings = `${";".repeat(metaCommentArr.length)}${file.map.mappings}`;
+            }
+          }
+        }
+      });
+    }
+  };
+}
+
+module.exports = index;

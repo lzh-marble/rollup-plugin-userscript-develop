@@ -8,23 +8,26 @@ import pkg from "./package.json";
 
 const isProduction = process.env.NODE_ENV == "prod";
 
+const external = require('module').builtinModules.concat(
+  Object.keys(pkg.dependencies),
+  Object.keys(pkg.devDependencies)
+);
+
 export default {
   input: path.resolve(__dirname, "src/index.ts"),
   output: [
     {
       file: pkg.main,
       format: "cjs",
-      exports: 'default'
+      exports: "auto",
     },
     {
       file: pkg.module,
       format: "es",
-      exports: 'default'
+      exports: "default",
     },
   ],
-  external: [
-    /@babel/
-  ],
+  external,
   plugins: [
     resolve({
       browser: false,
