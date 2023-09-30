@@ -68,7 +68,7 @@ export default function (options: PluginOptions = {}): Plugin {
           if (options?.extractToExternal) {
             const spaceLength = metaCommentArr.reduce((result, comment) => {
               const prefixLength =
-                comment.match(/@\w+\s+/).length - "@require".length;
+                comment.match(/@\w+\s+/)?.length ?? 0 - "@require".length;
 
               return (result = Math.max(prefixLength, result));
             }, 1);
