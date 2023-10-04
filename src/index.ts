@@ -67,8 +67,10 @@ export default function (options: PluginOptions = {}): Plugin {
         if (file.type === "chunk") {
           if (options?.extractToExternal) {
             const spaceLength = metaCommentArr.reduce((result, comment) => {
+              const commentMatchResult = comment.match(/@\w+\s+/);
               const prefixLength =
-                comment.match(/@\w+\s+/)?.length ?? 0 - "@require".length;
+                (commentMatchResult ? commentMatchResult.length : 0) -
+                "@require".length;
 
               return (result = Math.max(prefixLength, result));
             }, 1);

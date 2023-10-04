@@ -1,6 +1,6 @@
 {
   "name": "rollup-plugin-userscript-responsive-develop",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Avoid copying and pasting scripts multiple times during development",
   "author": {
     "name": "lzh-marble",
