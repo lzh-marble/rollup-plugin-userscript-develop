@@ -78,8 +78,10 @@ function index (options = {}) {
             });
           } else {
             file.code = `${userscriptHeadersStr}\n${file.code}`;
-            // 因为是给生成代码的顶部添加userscript header，所以mapping也要加上相同行数的空行使映射正确
-            file.map.mappings = `${";".repeat(userscriptHeaders.length)}${file.map.mappings}`;
+            if (file?.map?.mappings) {
+              // 因为是给生成代码的顶部添加userscript header，所以mapping也要加上相同行数的空行使映射正确
+              file.map.mappings = `${";".repeat(userscriptHeaders.length)}${file.map.mappings}`;
+            }
           }
         }
       });
